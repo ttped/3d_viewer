@@ -1,23 +1,56 @@
 import React, { useState, useRef, useEffect, useMemo, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Html, useProgress, Center } from '@react-three/drei';
+import { OrbitControls, Html, useProgress, Center, useGLTF } from '@react-three/drei';
 import * as THREE from 'three';
 import { Search, Box, Layers, Settings, ChevronRight, Info, RotateCcw, ArrowLeft } from 'lucide-react';
-import './ModelViewer.css'; // Import the separated CSS
+import './ModelViewer.css';
 
 /**
  * ------------------------------------------------------------------
- * MOCK DATA
+ * REAL MODEL LOADER
+ * ------------------------------------------------------------------
+ */
+function RealModel({ url, highlight, selectedPartName, onPartSelect }) {
+  // Load the GLB file from the URL
+  const { scene } = useGLTF(url);
+
+  // Apply highlighting logic when search or selection changes
+  useEffect(() => {
+    updateHighlight(scene, highlight, selectedPartName);
+  }, [scene, highlight, selectedPartName]);
+
+  return (
+    <primitive 
+      object={scene} 
+      onClick={(e) => {
+        e.stopPropagation();
+        // Identify the clicked part
+        onPartSelect({ name: e.object.name, ...e.object.userData });
+      }}
+      onPointerOver={() => document.body.style.cursor = 'pointer'}
+      onPointerOut={() => document.body.style.cursor = 'auto'}
+    />
+  );
+}
+
+/**
+ * ------------------------------------------------------------------
+ * DATA CONFIGURATION
  * ------------------------------------------------------------------
  */
 const SYSTEMS = [
-  { id: 1, name: 'Main Engine Assembly', type: 'demo-engine', description: 'Primary propulsion unit. Contains Pistons, Gears, and Housing.' },
-  { id: 2, name: 'Hydraulic Pump System', type: 'demo-pump', description: 'Fluid control module. Contains Valves and Reservoirs.' },
-  { id: 3, name: 'Control Circuit Alpha', type: 'demo-circuit', description: 'Main PCB unit. Contains Chips and Capacitors.' },
+  { 
+    id: 1, 
+    name: 'Desk', 
+    // Ensure this file exists in /public/models/source/
+    path: '/models/source/antique_wooden_desk_with_props.glb', 
+    description: 'Imported GLB model' 
+  },
+  // You can add more .glb files here
 ];
 
 /**
- * Helper to make materials transparent, solid, or highlighted based on search/selection
+ * Helper to make materials transparent, solid, or highlighted
  */
 const updateHighlight = (scene, searchTerm, selectedPartName) => {
   if (!scene) return;
@@ -38,27 +71,23 @@ const updateHighlight = (scene, searchTerm, selectedPartName) => {
 
       // 2. Logic: Reset, Select, or Search Highlight
       if (!normalizedSearch && !selectedPartName) {
-        // Default state
         child.material = child.userData.originalMaterial;
       } else {
         const newMat = child.userData.originalMaterial.clone();
 
         if (isSelected) {
-          // Priority 1: Selection (Orange)
           newMat.emissive = selectColor;
           newMat.emissiveIntensity = 0.6;
           newMat.color = selectColor;
           newMat.transparent = false;
           newMat.opacity = 1;
         } else if (isSearchMatch) {
-          // Priority 2: Search Match (Blue)
           newMat.emissive = searchColor;
           newMat.emissiveIntensity = 0.5;
           newMat.color = searchColor;
           newMat.transparent = false;
           newMat.opacity = 1;
         } else {
-          // Priority 3: Ghost Mode (Transparent Grey)
           newMat.transparent = true;
           newMat.opacity = 0.1;
           newMat.color = new THREE.Color('#cccccc');
@@ -69,80 +98,6 @@ const updateHighlight = (scene, searchTerm, selectedPartName) => {
     }
   });
 };
-
-/**
- * ------------------------------------------------------------------
- * PROCEDURAL ASSEMBLY (DEMO MODE)
- * ------------------------------------------------------------------
- */
-function ProceduralAssembly({ type, highlight, onPartSelect, selectedPartName }) {
-  const groupRef = useRef();
-  
-  useEffect(() => {
-    if (groupRef.current) {
-      updateHighlight(groupRef.current, highlight, selectedPartName);
-    }
-  }, [highlight, selectedPartName, type]);
-
-  const parts = useMemo(() => {
-    // These objects now only contain position/color data, no extra fake metadata
-    const items = [];
-    if (type === 'demo-engine') {
-      items.push(
-        { name: 'Engine-Housing-Outer', geo: 'box', args: [4, 3, 4], pos: [0, 0, 0], color: '#475569' },
-        { name: 'Piston-001', geo: 'cylinder', args: [0.5, 0.5, 2, 32], pos: [-1, 2, -1], color: '#cbd5e1' },
-        { name: 'Piston-002', geo: 'cylinder', args: [0.5, 0.5, 2, 32], pos: [1, 2, -1], color: '#cbd5e1' },
-        { name: 'Piston-003', geo: 'cylinder', args: [0.5, 0.5, 2, 32], pos: [-1, 2, 1], color: '#cbd5e1' },
-        { name: 'Piston-004', geo: 'cylinder', args: [0.5, 0.5, 2, 32], pos: [1, 2, 1], color: '#cbd5e1' },
-        { name: 'Gear-Drive-Main', geo: 'torus', args: [1.2, 0.3, 16, 100], pos: [0, 0, 2.1], color: '#fbbf24' },
-        { name: 'Shaft-Coupling', geo: 'box', args: [0.5, 0.5, 5], pos: [2.5, 0, 0], color: '#94a3b8' }
-      );
-    } else if (type === 'demo-pump') {
-      items.push(
-        { name: 'Reservoir-Tank', geo: 'sphere', args: [2, 32, 32], pos: [0, 0, 0], color: '#3b82f6' },
-        { name: 'Valve-Inlet', geo: 'box', args: [1, 1, 1], pos: [-2, 0, 0], color: '#ef4444' },
-        { name: 'Valve-Outlet', geo: 'box', args: [1, 1, 1], pos: [2, 0, 0], color: '#22c55e' },
-        { name: 'Pipe-Connector', geo: 'cylinder', args: [0.2, 0.2, 6, 16], pos: [0, 2, 0], rot: [0, 0, Math.PI/2], color: '#64748b' }
-      );
-    } else {
-       items.push(
-        { name: 'PCB-Board-Base', geo: 'box', args: [5, 0.2, 5], pos: [0, 0, 0], color: '#064e3b' },
-        { name: 'Chip-CPU', geo: 'box', args: [1, 0.5, 1], pos: [0, 0.5, 0], color: '#1e293b' },
-        { name: 'Capacitor-C1', geo: 'cylinder', args: [0.3, 0.3, 0.8, 16], pos: [-1.5, 0.5, -1.5], color: '#eab308' },
-        { name: 'Capacitor-C2', geo: 'cylinder', args: [0.3, 0.3, 0.8, 16], pos: [-1.0, 0.5, -1.5], color: '#eab308' },
-        { name: 'Resistor-Array', geo: 'box', args: [2, 0.3, 0.5], pos: [1, 0.4, 1.5], color: '#000000' }
-      );
-    }
-    return items;
-  }, [type]);
-
-  return (
-    <group ref={groupRef} dispose={null}>
-      {parts.map((part, idx) => (
-        <mesh 
-          key={idx} 
-          name={part.name} 
-          position={part.pos} 
-          rotation={part.rot || [0,0,0]}
-          castShadow 
-          receiveShadow
-          onClick={(e) => {
-            e.stopPropagation();
-            onPartSelect(part);
-          }}
-          onPointerOver={() => document.body.style.cursor = 'pointer'}
-          onPointerOut={() => document.body.style.cursor = 'auto'}
-        >
-          {part.geo === 'box' && <boxGeometry args={part.args} />}
-          {part.geo === 'sphere' && <sphereGeometry args={part.args} />}
-          {part.geo === 'cylinder' && <cylinderGeometry args={part.args} />}
-          {part.geo === 'torus' && <torusGeometry args={part.args} />}
-          <meshStandardMaterial color={part.color} metalness={0.4} roughness={0.5} />
-        </mesh>
-      ))}
-    </group>
-  );
-}
 
 function Loader() {
   const { progress } = useProgress();
@@ -164,7 +119,7 @@ function Loader() {
 
 /**
  * ------------------------------------------------------------------
- * EXPORTED COMPONENT
+ * MAIN COMPONENT
  * ------------------------------------------------------------------
  */
 export default function ModelViewer() {
@@ -181,6 +136,8 @@ export default function ModelViewer() {
   };
 
   const handlePartSelect = (part) => {
+    // Log the part data to console to help you debug what metadata exists on your GLB
+    console.log("Selected Part Data:", part); 
     setSelectedPart(part);
   };
 
@@ -199,7 +156,7 @@ export default function ModelViewer() {
 
         <div className="mv-list-container">
           {selectedPart ? (
-            // DETAIL VIEW (Simpler now)
+            // DETAIL VIEW
             <div className="mv-details-panel">
               <button onClick={() => setSelectedPart(null)} className="mv-back-btn">
                 <ArrowLeft size={16} /> Back to List
@@ -208,17 +165,12 @@ export default function ModelViewer() {
               <div className="mv-section-label">Selected Component</div>
               
               <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '1rem' }}>
-                {selectedPart.name}
+                {selectedPart.name || "Unnamed Mesh"}
               </h2>
 
               <div className="mv-section-label">Raw Data</div>
-              {/* Displays generic data structure for debugging */}
               <div className="mv-raw-data">
-                {JSON.stringify({ 
-                  name: selectedPart.name, 
-                  position: selectedPart.pos,
-                  geometry: selectedPart.geo
-                }, null, 2)}
+                {JSON.stringify(selectedPart, null, 2)}
               </div>
             </div>
           ) : (
@@ -263,7 +215,7 @@ export default function ModelViewer() {
             </div>
             <input
               type="text"
-              placeholder="Search part (e.g., 'Piston', 'Gear')..."
+              placeholder="Search part..."
               className="mv-search-input"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -301,8 +253,9 @@ export default function ModelViewer() {
               
               <Suspense fallback={<Loader />}>
                 <Center>
-                  <ProceduralAssembly 
-                    type={activeSystem.type} 
+                  {/* USING REAL MODEL NOW */}
+                  <RealModel 
+                    url={activeSystem.path} // Pass the PATH, not the type
                     highlight={searchTerm} 
                     selectedPartName={selectedPart?.name}
                     onPartSelect={handlePartSelect}
