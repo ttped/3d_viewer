@@ -1,31 +1,58 @@
 import React, { useState, useRef, useEffect, useMemo, Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, Html, useProgress, Center, useGLTF } from '@react-three/drei';
+import { OrbitControls, Html, useProgress, Center, useGLTF, useFBX } from '@react-three/drei';
 import * as THREE from 'three';
 import { Search, Box, Layers, Settings, ChevronRight, Info, RotateCcw, ArrowLeft } from 'lucide-react';
 import './ModelViewer.css';
 
 /**
  * ------------------------------------------------------------------
- * REAL MODEL LOADER
+ * SMART MODEL LOADER (GLB & FBX)
  * ------------------------------------------------------------------
  */
-function RealModel({ url, highlight, selectedPartName, onPartSelect }) {
-  // Load the GLB file from the URL
-  const { scene } = useGLTF(url);
+function SmartModel({ url, ...props }) {
+  const isFbx = url.toLowerCase().endsWith('.fbx');
 
+  if (isFbx) {
+    return <FbxModel url={url} {...props} />;
+  }
+  return <GltfModel url={url} {...props} />;
+}
+
+function FbxModel({ url, ...props }) {
+  // useFBX returns the Group/Scene directly
+  const fbx = useFBX(url);
+  // FBX models often come in massive or tiny, automatic centering/scaling helps
+  return <BaseInteractiveModel scene={fbx} {...props} />;
+}
+
+function GltfModel({ url, ...props }) {
+  // useGLTF returns an object containing the scene
+  const { scene } = useGLTF(url);
+  return <BaseInteractiveModel scene={scene} {...props} />;
+}
+
+/**
+ * Shared Logic for Interaction & Highlighting
+ */
+function BaseInteractiveModel({ scene, highlight, selectedPartId, onPartSelect }) {
   // Apply highlighting logic when search or selection changes
   useEffect(() => {
-    updateHighlight(scene, highlight, selectedPartName);
-  }, [scene, highlight, selectedPartName]);
+    updateHighlight(scene, highlight, selectedPartId);
+  }, [scene, highlight, selectedPartId]);
 
   return (
     <primitive 
       object={scene} 
       onClick={(e) => {
         e.stopPropagation();
-        // Identify the clicked part
-        onPartSelect({ name: e.object.name, ...e.object.userData });
+        // IMPORTANT: We pass the UUID for robust selection matching
+        // We also pass the name and userData for the UI display
+        onPartSelect({ 
+          id: e.object.uuid, 
+          name: e.object.name, 
+          ...e.object.userData 
+        });
       }}
       onPointerOver={() => document.body.style.cursor = 'pointer'}
       onPointerOut={() => document.body.style.cursor = 'auto'}
@@ -35,24 +62,10 @@ function RealModel({ url, highlight, selectedPartName, onPartSelect }) {
 
 /**
  * ------------------------------------------------------------------
- * DATA CONFIGURATION
+ * HIGHLIGHT LOGIC
  * ------------------------------------------------------------------
  */
-const SYSTEMS = [
-  { 
-    id: 1, 
-    name: 'Desk', 
-    // Ensure this file exists in /public/models/source/
-    path: '/models/source/antique_wooden_desk_with_props.glb', 
-    description: 'Imported GLB model' 
-  },
-  // You can add more .glb files here
-];
-
-/**
- * Helper to make materials transparent, solid, or highlighted
- */
-const updateHighlight = (scene, searchTerm, selectedPartName) => {
+const updateHighlight = (scene, searchTerm, selectedPartId) => {
   if (!scene) return;
   const normalizedSearch = searchTerm.toLowerCase().trim();
   const searchColor = new THREE.Color('#3b82f6'); // Blue for search
@@ -66,28 +79,35 @@ const updateHighlight = (scene, searchTerm, selectedPartName) => {
       }
 
       const partName = (child.name || '').toLowerCase();
-      const isSelected = selectedPartName && partName === selectedPartName.toLowerCase();
+      
+      // CHECK 1: Is this the specific clicked object? (Checks UUID)
+      const isSelected = selectedPartId && child.uuid === selectedPartId;
+      
+      // CHECK 2: Does it match the text search? (Checks Name)
       const isSearchMatch = normalizedSearch && partName.includes(normalizedSearch);
 
-      // 2. Logic: Reset, Select, or Search Highlight
-      if (!normalizedSearch && !selectedPartName) {
+      if (!normalizedSearch && !selectedPartId) {
+        // Reset to default
         child.material = child.userData.originalMaterial;
       } else {
         const newMat = child.userData.originalMaterial.clone();
 
         if (isSelected) {
+          // Priority 1: Exact Click Selection (Orange)
           newMat.emissive = selectColor;
-          newMat.emissiveIntensity = 0.6;
+          newMat.emissiveIntensity = 0.8; // Made brighter
           newMat.color = selectColor;
           newMat.transparent = false;
           newMat.opacity = 1;
         } else if (isSearchMatch) {
+          // Priority 2: Search Match (Blue)
           newMat.emissive = searchColor;
           newMat.emissiveIntensity = 0.5;
           newMat.color = searchColor;
           newMat.transparent = false;
           newMat.opacity = 1;
         } else {
+          // Priority 3: Ghost Mode (Transparent Grey)
           newMat.transparent = true;
           newMat.opacity = 0.1;
           newMat.color = new THREE.Color('#cccccc');
@@ -98,6 +118,27 @@ const updateHighlight = (scene, searchTerm, selectedPartName) => {
     }
   });
 };
+
+/**
+ * ------------------------------------------------------------------
+ * DATA CONFIGURATION
+ * ------------------------------------------------------------------
+ */
+const SYSTEMS = [
+  { 
+    id: 1, 
+    name: 'Desk', 
+    path: '/models/source/antique_wooden_desk_with_props.glb', 
+    description: 'Imported GLB model' 
+  },
+  // Example of how you would add an FBX file:
+  // { 
+  //   id: 2, 
+  //   name: 'Character', 
+  //   path: '/models/character.fbx', 
+  //   description: 'FBX Example' 
+  // },
+];
 
 function Loader() {
   const { progress } = useProgress();
@@ -135,10 +176,9 @@ export default function ModelViewer() {
     setSearchTerm('');
   };
 
-  const handlePartSelect = (part) => {
-    // Log the part data to console to help you debug what metadata exists on your GLB
-    console.log("Selected Part Data:", part); 
-    setSelectedPart(part);
+  const handlePartSelect = (partData) => {
+    console.log("Selected Part:", partData);
+    setSelectedPart(partData);
   };
 
   return (
@@ -148,10 +188,9 @@ export default function ModelViewer() {
       <div className="mv-sidebar">
         <div className="mv-header">
           <div className="mv-title-row">
-            <Box size={24} color="#2563eb" />
-            <h1 className="mv-title">TechViewer 3D</h1>
+            <Box size={24} color="#3b82f6" /> {/* Used var color directly for icon */}
+            <h1 className="mv-title">3D Viewer</h1>
           </div>
-          <p className="mv-subtitle">System Component Visualizer</p>
         </div>
 
         <div className="mv-list-container">
@@ -164,7 +203,7 @@ export default function ModelViewer() {
 
               <div className="mv-section-label">Selected Component</div>
               
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: '#1e293b', marginBottom: '1rem' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 'bold', color: 'var(--mv-text)', marginBottom: '1rem' }}>
                 {selectedPart.name || "Unnamed Mesh"}
               </h2>
 
@@ -253,11 +292,10 @@ export default function ModelViewer() {
               
               <Suspense fallback={<Loader />}>
                 <Center>
-                  {/* USING REAL MODEL NOW */}
-                  <RealModel 
-                    url={activeSystem.path} // Pass the PATH, not the type
+                  <SmartModel 
+                    url={activeSystem.path} 
                     highlight={searchTerm} 
-                    selectedPartName={selectedPart?.name}
+                    selectedPartId={selectedPart?.id} // Pass the UUID
                     onPartSelect={handlePartSelect}
                   />
                 </Center>

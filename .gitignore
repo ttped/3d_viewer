@@ -40,3 +40,5 @@ coverage/
 # OS Metadata
 .DS_Store
 Thumbs.db
+
+public/models/
